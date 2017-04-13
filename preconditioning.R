@@ -62,7 +62,7 @@ build_dataframe <- function(path) {
   }
   
   #return value
-  data_frame = data.frame(Text=NULL, Year=NULL, Month=NULL, Day=NULL, Classify=NULL)
+  data_frame = data.frame()
   
   current_path = getwd()
   setwd(path)
@@ -87,16 +87,15 @@ build_dataframe <- function(path) {
     
     news <- data.frame(
       File = f,
-      Text = empty2NA(full_text), 
       Year = empty2NA(publication_year), 
       Month = empty2NA(publication_month), 
       Day = empty2NA(publication_day_of_month), 
-      Classify = empty2NA(classify))
+      Classify = empty2NA(classify),
+      Text = empty2NA(full_text))
     
     data_frame = rbind.data.frame(data_frame, news)
   }
   
-  data_frame$Classify <- sapply(as.vector(data_frame$Classify), strsplit, split="/")
   setwd(current_path)
   return(data_frame)
 }
@@ -109,13 +108,31 @@ text_pre <- function(full_text) {
   library(NLP)
   library(tm)
   reuters = Corpus(VectorSource(full_text))
+  reuters = tm_map(reuters, tolower)
   reuters = tm_map(reuters, removePunctuation)
   reuters = tm_map(reuters, removeWords, stopwords("english"))
   reuters = tm_map(reuters, removeNumbers)
   reuters = tm_map(reuters, stripWhitespace)
-  reuters = tm_map(reuters, tolower)
   reuters = tm_map(reuters, stemDocument)
   return(reuters)
+}
+
+#Create directory in this workspace named dname and output reuters into it,
+#if there is file or directory has the same name, if will not work
+#param:
+#    dname : directory name
+#    reuters : reuters
+#no return
+reuters_output <- function(dname, reuters) {
+  library(NLP)
+  library(tm)
+  if(!file.exists(dname)) {
+    dir.create(dname)
+    c_path = getwd()
+    setwd(paste(c_path, dname, sep = "/"))
+    writeCorpus(reuters)
+    setwd(c_path) 
+  }
 }
 
 #build bag of words with reuters
@@ -129,37 +146,60 @@ build_BOW <- function(reuters) {
   
 }
 
+#Take words which freq over 100
+#param:
+#    m : tdm matrix
+#return a dataframe with word and freq
+words_filter <- function(m) {
+  word_freqs = sort(rowSums(m), decreasing=TRUE)
+  dm = data.frame(word = names(word_freqs), freq = word_freqs)
+  result = subset(dm, freq > 100)
+  return(result)
+}
+
 #paint wordcloud
 #param:
 #    m : tdm matrix
 #no return and paint a png image in path getwd()
-paint_wordcloud <- function(matrix) {
+paint_wordcloud <- function(m) {
   library(RColorBrewer)
   library(wordcloud)
   
-  word_freqs = sort(rowSums(matrix), decreasing=TRUE)
+  word_freqs = sort(rowSums(m), decreasing=TRUE)
   dm = data.frame(word = names(word_freqs[1:100]), freq = word_freqs[1:100])
   png(file="wordcloud.png", bg="white",width = 480, height = 480)
-  wordcloud(dm$word, dm$freq, min.freq = 100, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
+  wordcloud(dm$word, dm$freq, random.order = FALSE, colors = brewer.pal(8, "Dark2"))
   dev.off()  
 }
 
-paint_wordlength_histogram <- function(matrix) {
+#paint wordlength_histogram
+#param:
+#    m : tdm matrix
+#no return and paint a png image in path getwd()
+paint_wordlength_histogram <- function(m) {
   library(ggplot2)
-  dictionary = row.names(matrix)
+  dictionary = row.names(m)
   wordlength = nchar(dictionary)
   png(file="wordlength_histogram.png", bg="white",width = 980, height = 480)
   barplot(table(unlist(wordlength)), col = "lightblue")
   dev.off()
 }
 
+#paint classify_histogram
+#param:
+#    classify : classify vector
+#no return and paint a png image in path getwd()
 paint_classify_histogram <- function(classify) {
   library(ggplot2)
-  png(file="classify_histogram.png", bg="white",width = 3000, height = 480)
-  barplot(table(unlist(classify)), col = "lightblue")
+  png(file="classify_histogram.png", bg="white",width = 480, height = 3000)
+  barplot(table(unlist(classify)), col = "lightblue", horiz = TRUE)
   dev.off()
 }
 
+#paint month_histogram
+#param:
+#    month : month vector
+#no return and paint a png image in path getwd()
 paint_month_histogram <- function(month) {
   library(ggplot2)
   png(file="month_histogram.png", bg="white",width = 480, height = 480)
@@ -179,15 +219,28 @@ build_cosine <- function(m) {
   return(result)
 }
 
+
 current_path = getwd()
 target_path = paste(current_path, "nyt_corpus/samples_500", sep = '/')
+
 dataframe = build_dataframe(target_path)
+write.csv(dataframe, file = "dataframe.csv")
+
 reuters = text_pre(dataframe[["Text"]])
-#writeCorpus(reuters)
+reuters_output('Pre', reuters)
+
 m = build_BOW(reuters)
+
+wordover100 = words_filter(m)
+write.csv(wordover100, file="wordfilter.csv")
+
 paint_wordcloud(m)
+
 paint_wordlength_histogram(m)
+
+dataframe$Classify <- sapply(as.vector(dataframe$Classify), strsplit, split="/")
 paint_classify_histogram(dataframe[["Classify"]])
+
 paint_month_histogram(dataframe[["Month"]])
 
 cosine_matrix = build_cosine(m)
